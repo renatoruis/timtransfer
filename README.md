@@ -26,11 +26,28 @@ Simple, free, and secure file transfer. No account required.
 - **UUID** for share IDs
 - **Tailwind CSS** (CDN) for UI
 
+## Project structure
+
+```
+timtransfer/
+├── lib/              # Shared utilities (expiry, etc.)
+├── public/           # Static assets
+│   ├── images/       # Logo, QR code PIX
+│   ├── js/           # feedback.js, share.js
+│   └── *.html        # Pages (index, app, share, 404)
+├── scripts/          # Cleanup script
+├── server.js         # Entry point
+├── docker-compose.yml
+├── Dockerfile
+└── .env.example      # Copy to .env and configure
+```
+
 ## Run locally
 
 ```bash
 git clone https://github.com/renatoruis/timtransfer.git
 cd timtransfer
+cp .env.example .env   # Edit with your values
 npm install
 npm start
 ```
@@ -39,12 +56,14 @@ App runs on `http://localhost:9090` by default.
 
 ### Environment variables
 
-| Variable              | Default | Description                          |
-|-----------------------|---------|--------------------------------------|
-| `PORT`                | 9090    | Server port                          |
-| `EXPIRY_HOURS`        | 24      | Hours until files expire             |
-| `RECAPTCHA_SITE_KEY`  | —       | reCAPTCHA v3 site key (feedback)     |
-| `RECAPTCHA_SECRET_KEY`| —       | reCAPTCHA v3 secret key (backend)    |
+| Variable              | Default | Description                              |
+|-----------------------|---------|------------------------------------------|
+| `PORT`                | 9090    | Server port                              |
+| `EXPIRY_HOURS`        | 24      | Hours until files expire                 |
+| `MAX_UPLOADS_DISK_MB` | 1024    | Max disk for uploads (MB). Ex: 1024=1GB  |
+| `RECAPTCHA_SITE_KEY`  | —       | reCAPTCHA v3 site key (feedback)        |
+| `RECAPTCHA_SECRET_KEY`| —       | reCAPTCHA v3 secret key (backend)       |
+| `STATUS_SECRET`       | —       | Token para acessar /status (técnicos)   |
 
 ## Docker
 
@@ -71,6 +90,7 @@ docker run -p 9090:9090 ghcr.io/renatoruis/timtransfer:main
 | `/api/share/:id` | Share metadata (JSON)     |
 | `/api/verify/:id`| Verify PIN (JSON)        |
 | `/download/:id`  | ZIP download             |
+| `/status?token=` | Status (técnicos)        |
 
 ## License
 

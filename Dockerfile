@@ -7,6 +7,7 @@ RUN npm install --production
 
 COPY server.js ./
 COPY lib ./lib
+COPY scripts ./scripts
 COPY public ./public
 
 ENV NODE_ENV=production

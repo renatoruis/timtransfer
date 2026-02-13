@@ -19,6 +19,7 @@
   var fileList = document.getElementById('fileList');
   var totalSize = document.getElementById('totalSize');
   var downloadBtn = document.getElementById('downloadBtn');
+  var downloadSuccess = document.getElementById('downloadSuccess');
 
   var verifiedPassword = '';
 
@@ -79,12 +80,41 @@
   function setupDownloadNoPassword() {
     downloadBtn.innerHTML = DOWNLOAD_BTN_HTML;
     downloadBtn.onclick = function() {
-      window.location.href = '/download/' + bundleId;
+      doDownload();
     };
   }
 
   function setupDownloadWithPassword() {
     downloadBtn.onclick = doDownloadWithPassword;
+  }
+
+  function showDownloadSuccess() {
+    downloadBtn.classList.add('hidden');
+    if (downloadSuccess) downloadSuccess.classList.remove('hidden');
+  }
+
+  function doDownload() {
+    downloadBtn.disabled = true;
+    downloadBtn.innerHTML = SPINNER_HTML;
+    fetch('/download/' + bundleId)
+      .then(function(r) {
+        if (!r.ok) throw new Error('Erro ao baixar');
+        return r.blob();
+      })
+      .then(function(blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'arquivos.zip';
+        a.click();
+        URL.revokeObjectURL(url);
+        showDownloadSuccess();
+      })
+      .catch(function(err) {
+        downloadBtn.disabled = false;
+        downloadBtn.innerHTML = DOWNLOAD_BTN_HTML;
+        alert(err.message || 'Erro ao baixar.');
+      });
   }
 
   function doDownloadWithPassword() {
@@ -111,8 +141,7 @@
         a.download = 'arquivos.zip';
         a.click();
         URL.revokeObjectURL(url);
-        downloadBtn.disabled = false;
-        downloadBtn.innerHTML = DOWNLOAD_BTN_HTML;
+        showDownloadSuccess();
       })
       .catch(function(err) {
         downloadBtn.disabled = false;

@@ -24,6 +24,49 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 }
 
 const MAX_SESSION_SIZE = 100 * 1024 * 1024; // 100MB por sessão (soma de todos os arquivos)
+const MAX_UPLOADS_DISK_MB = parseInt(process.env.MAX_UPLOADS_DISK_MB || '1024', 10) || 1024;
+const MAX_UPLOADS_DISK_BYTES = MAX_UPLOADS_DISK_MB * 1024 * 1024;
+
+function getUploadsDirSize() {
+  let total = 0;
+  try {
+    const files = fs.readdirSync(UPLOAD_DIR);
+    for (const f of files) {
+      const fp = path.join(UPLOAD_DIR, f);
+      const stat = fs.statSync(fp);
+      if (stat.isFile()) total += stat.size;
+    }
+  } catch (e) {
+    console.error('Erro ao medir uploads:', e);
+  }
+  return total;
+}
+
+function getBundleCount() {
+  try {
+    const files = fs.readdirSync(UPLOAD_DIR);
+    return files.filter(f => f.startsWith('bundle.') && f.endsWith('.json')).length;
+  } catch (e) {
+    return 0;
+  }
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function formatUptime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const parts = [];
+  if (h > 0) parts.push(h + 'h');
+  if (m > 0) parts.push(m + 'min');
+  parts.push(s + 's');
+  return parts.join(' ');
+}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
@@ -44,6 +87,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const RECAPTCHA_SITE_KEY = process.env.RECAPTCHA_SITE_KEY || '';
 const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY || '';
+const STATUS_SECRET = process.env.STATUS_SECRET || '';
 
 app.get('/api/config', (req, res) => {
   res.json({ recaptchaSiteKey: RECAPTCHA_SITE_KEY });
@@ -106,11 +150,82 @@ app.get('/app', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'app.html'));
 });
 
+app.get('/status', (req, res) => {
+  const token = (req.query.token || '').trim();
+  if (!STATUS_SECRET || token !== STATUS_SECRET) {
+    return res.status(403).send('Acesso negado.');
+  }
+  const uploadsSize = getUploadsDirSize();
+  const bundleCount = getBundleCount();
+  const mem = process.memoryUsage();
+  const uptime = process.uptime();
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Status — TimTransfer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+  </style>
+</head>
+<body class="bg-[#f5f5f7] min-h-screen p-8 text-[#1d1d1f]">
+  <div class="max-w-2xl mx-auto">
+    <h1 class="text-2xl font-semibold mb-6">Status do servidor</h1>
+    <div class="space-y-4">
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-[#d2d2d7]/50">
+        <h2 class="text-sm font-medium text-[#86868b] mb-1">Disco (uploads)</h2>
+        <p class="text-xl font-semibold">${formatBytes(uploadsSize)} / ${MAX_UPLOADS_DISK_MB} MB</p>
+        <div class="mt-2 h-2 bg-[#e8e8ed] rounded-full overflow-hidden">
+          <div class="h-full bg-[#0071e3] rounded-full transition-all" style="width: ${Math.min(100, (uploadsSize / MAX_UPLOADS_DISK_BYTES) * 100)}%"></div>
+        </div>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-[#d2d2d7]/50">
+        <h2 class="text-sm font-medium text-[#86868b] mb-1">Bundles ativos</h2>
+        <p class="text-xl font-semibold">${bundleCount}</p>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-[#d2d2d7]/50">
+        <h2 class="text-sm font-medium text-[#86868b] mb-1">Uptime</h2>
+        <p class="text-xl font-semibold">${formatUptime(uptime)}</p>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-[#d2d2d7]/50">
+        <h2 class="text-sm font-medium text-[#86868b] mb-1">Memória (Node)</h2>
+        <p class="text-base">RSS: ${formatBytes(mem.rss)} | Heap: ${formatBytes(mem.heapUsed)} / ${formatBytes(mem.heapTotal)}</p>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-[#d2d2d7]/50">
+        <h2 class="text-sm font-medium text-[#86868b] mb-1">Config</h2>
+        <p class="text-sm">Expiração: ${EXPIRY_HOURS}h | Limite disco: ${MAX_UPLOADS_DISK_MB} MB</p>
+      </div>
+    </div>
+    <p class="mt-6 text-sm text-[#86868b]">
+      <a href="/status?token=${encodeURIComponent(token)}" class="text-[#0071e3] hover:underline">Atualizar</a>
+      &nbsp;·&nbsp;
+      <a href="/" class="text-[#0071e3] hover:underline">Voltar</a>
+    </p>
+  </div>
+</body>
+</html>`;
+  res.send(html);
+});
+
 app.post('/upload', (req, res) => {
   upload(req, res, (err) => {
     if (err) {
       const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Arquivo individual maior que 100MB.' : (err.message || 'Erro no upload');
       return res.status(400).json({ error: msg });
+    }
+    const uploadsDirSize = getUploadsDirSize();
+    if (uploadsDirSize > MAX_UPLOADS_DISK_BYTES) {
+      const files = req.files || [];
+      for (const file of files) {
+        const filePath = path.join(UPLOAD_DIR, file.filename);
+        try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (e) { console.error(e); }
+      }
+      return res.status(503).json({
+        error: `Servidor cheio. Limite de ${MAX_UPLOADS_DISK_MB}MB atingido. Tente novamente mais tarde.`
+      });
     }
     const password = (req.body?.password || '').trim();
     if (!/^\d{4}$/.test(password)) {
