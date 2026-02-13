@@ -53,9 +53,16 @@
       <p class="text-[15px] text-[#86868b] font-medium">Arraste ou clique para enviar</p>
     </div>
 
-    <div id="uploadProgress" class="mt-6 hidden">
-      <div class="h-1.5 bg-[#d2d2d7]/50 rounded-full overflow-hidden">
-        <div id="progressBar" class="h-full bg-[#0071e3] rounded-full transition-all duration-500 ease-out" style="width: 0%"></div>
+    <div id="uploadProgress" class="mt-6 hidden p-4 rounded-2xl glass glass-border shadow-soft">
+      <div class="flex items-center gap-3 mb-3">
+        <svg class="animate-spin w-5 h-5 text-[#0071e3] shrink-0" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <p id="progressText" class="text-[15px] text-[#1d1d1f] font-medium">Enviando arquivos...</p>
+      </div>
+      <div class="h-2 bg-[#d2d2d7]/50 rounded-full overflow-hidden">
+        <div id="progressBar" class="h-full bg-[#0071e3] rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
       </div>
     </div>
 
@@ -154,6 +161,8 @@
     const copyBtn = document.getElementById('copyBtn');
     const errorEl = document.getElementById('error');
     const uploadProgress = document.getElementById('uploadProgress');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
     const toast = document.getElementById('toast');
 
     const MAX_SESSION_BYTES = 100 * 1024 * 1024;
@@ -225,15 +234,29 @@
 
       result.classList.add('hidden');
       uploadProgress.classList.remove('hidden');
+      progressBar.style.width = '0%';
+      progressText.textContent = 'Enviando arquivos...';
 
       const formData = new FormData();
       formData.append('password', password);
       files.forEach(f => formData.append('file', f));
 
-      fetch('/upload', { method: 'POST', body: formData })
-        .then(r => r.json())
-        .then(data => {
-          uploadProgress.classList.add('hidden');
+      const xhr = new XMLHttpRequest();
+
+      xhr.upload.addEventListener('progress', function(e) {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          progressBar.style.width = pct + '%';
+          const loaded = formatBytes(e.loaded);
+          const totalStr = formatBytes(e.total);
+          progressText.textContent = 'Enviando... ' + loaded + ' de ' + totalStr + ' (' + pct + '%)';
+        }
+      });
+
+      xhr.addEventListener('load', function() {
+        uploadProgress.classList.add('hidden');
+        try {
+          const data = JSON.parse(xhr.responseText);
           if (data.error) {
             showError(data.error);
             return;
@@ -241,11 +264,18 @@
           shareUrl.value = data.url;
           renderFileList(data.files || []);
           result.classList.remove('hidden');
-        })
-        .catch(() => {
-          uploadProgress.classList.add('hidden');
+        } catch (err) {
           showError('Erro ao enviar.');
-        });
+        }
+      });
+
+      xhr.addEventListener('error', function() {
+        uploadProgress.classList.add('hidden');
+        showError('Erro ao enviar.');
+      });
+
+      xhr.open('POST', '/upload');
+      xhr.send(formData);
     }
 
     const pinInputs = [document.getElementById('pin0'), document.getElementById('pin1'), document.getElementById('pin2'), document.getElementById('pin3')];
