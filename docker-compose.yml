@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    ports:
+      - "9090:9090"
+    environment:
+      - PORT=9090
+    volumes:
+      - uploads_data:/app/uploads
+
+volumes:
+  uploads_data:

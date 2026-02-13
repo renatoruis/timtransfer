@@ -1,0 +1,296 @@
+require('dotenv').config();
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const multer = require('multer');
+const archiver = require('archiver');
+const { v4: uuidv4 } = require('uuid');
+const { isBundleExpired, deleteBundle, EXPIRY_HOURS, EXPIRY_MS } = require('./lib/expiry');
+
+function hashPassword(pwd) {
+  return crypto.createHash('sha256').update(pwd).digest('hex');
+}
+function verifyPassword(pwd, hash) {
+  return hash && hash === hashPassword(pwd);
+}
+
+const app = express();
+const PORT = process.env.PORT || 9090;
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+const MAX_SESSION_SIZE = 100 * 1024 * 1024; // 100MB por sessão (soma de todos os arquivos)
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) => {
+    const id = uuidv4();
+    const ext = path.extname(file.originalname) || '';
+    cb(null, `${id}${ext}`);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: MAX_SESSION_SIZE }
+}).array('file', 50);
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+const RECAPTCHA_SITE_KEY = process.env.RECAPTCHA_SITE_KEY || '';
+const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY || '';
+
+app.get('/api/config', (req, res) => {
+  res.json({ recaptchaSiteKey: RECAPTCHA_SITE_KEY });
+});
+
+async function verifyRecaptcha(token) {
+  if (!RECAPTCHA_SECRET_KEY) return true;
+  if (!token) return false;
+  try {
+    const r = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ secret: RECAPTCHA_SECRET_KEY, response: token })
+    });
+    const data = await r.json();
+    return data.success && (data.score === undefined || data.score >= 0.5);
+  } catch (e) {
+    console.error('reCAPTCHA verify error:', e);
+    return false;
+  }
+}
+
+app.post('/api/feedback', express.json(), async (req, res) => {
+  const { type, message, email, recaptchaToken } = req.body || {};
+  const msg = (message || '').trim();
+  if (!msg) {
+    return res.status(400).json({ error: 'Mensagem é obrigatória.' });
+  }
+  const validTypes = ['sugestao', 'melhoria', 'critica', 'suporte'];
+  const feedbackType = validTypes.includes(type) ? type : 'sugestao';
+
+  const valid = await verifyRecaptcha(recaptchaToken);
+  if (!valid) {
+    return res.status(400).json({ error: 'Verificação de segurança falhou. Tente novamente.' });
+  }
+
+  const feedback = {
+    type: feedbackType,
+    message: msg,
+    email: (email || '').trim(),
+    createdAt: new Date().toISOString()
+  };
+  console.log('[Feedback]', JSON.stringify(feedback, null, 2));
+  const feedbackDir = path.join(__dirname, 'feedback');
+  if (!fs.existsSync(feedbackDir)) fs.mkdirSync(feedbackDir, { recursive: true });
+  const filePath = path.join(feedbackDir, `feedback_${Date.now()}.json`);
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(feedback, null, 2));
+  } catch (e) {
+    console.error('Erro ao salvar feedback:', e);
+  }
+  res.json({ ok: true });
+});
+
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get('/app', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'app.html'));
+});
+
+app.post('/upload', (req, res) => {
+  upload(req, res, (err) => {
+    if (err) {
+      const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Arquivo individual maior que 100MB.' : (err.message || 'Erro no upload');
+      return res.status(400).json({ error: msg });
+    }
+    const password = (req.body?.password || '').trim();
+    if (!/^\d{4}$/.test(password)) {
+      const files = req.files || [];
+      for (const file of files) {
+        const filePath = path.join(UPLOAD_DIR, file.filename);
+        try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (e) { console.error(e); }
+      }
+      return res.status(400).json({ error: 'Digite uma senha de 4 números.' });
+    }
+    const files = req.files || [];
+    if (files.length === 0) {
+      return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+    }
+    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    if (totalSize > MAX_SESSION_SIZE) {
+      for (const file of files) {
+        const filePath = path.join(UPLOAD_DIR, file.filename);
+        try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (e) { console.error(e); }
+      }
+      return res.status(400).json({
+        error: `Limite da sessão: 100MB no total. Você enviou ${(totalSize / (1024 * 1024)).toFixed(1)}MB. Remova arquivos ou envie em mais de uma sessão.`
+      });
+    }
+
+    const bundleId = uuidv4();
+    const bundleMeta = { files: [] };
+
+    for (const file of files) {
+      const id = path.basename(file.filename, path.extname(file.filename));
+      const ext = path.extname(file.originalname) || '';
+      const metaPath = path.join(UPLOAD_DIR, `${id}.meta.json`);
+      const meta = {
+        originalName: file.originalname || 'arquivo',
+        size: file.size,
+        mimeType: file.mimetype
+      };
+      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+      bundleMeta.files.push({ id, originalName: meta.originalName, size: meta.size });
+    }
+    bundleMeta.passwordHash = hashPassword(password);
+    bundleMeta.createdAt = Date.now();
+
+    const bundlePath = path.join(UPLOAD_DIR, `bundle.${bundleId}.json`);
+    fs.writeFileSync(bundlePath, JSON.stringify(bundleMeta, null, 2));
+
+    const url = `${req.protocol}://${req.get('host')}/share/${bundleId}`;
+    const fileList = bundleMeta.files.map(f => ({ name: f.originalName, size: f.size }));
+    res.json({ url, bundleId, files: fileList });
+  });
+});
+
+app.get('/share/:id', (req, res) => {
+  const id = req.params.id.replace(/[^a-zA-Z0-9-]/g, '');
+  const bundlePath = path.join(UPLOAD_DIR, `bundle.${id}.json`);
+  if (!fs.existsSync(bundlePath)) {
+    return res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
+  }
+  const bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
+  if (isBundleExpired(bundle)) {
+    deleteBundle(id, bundle);
+    return res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
+  }
+  res.sendFile(path.join(__dirname, 'public', 'share.html'), {
+    headers: { 'Cache-Control': 'no-store' }
+  }, (err) => {
+    if (err) res.status(500).send('Erro ao carregar página');
+  });
+});
+
+app.get('/api/share/:id', (req, res) => {
+  const id = req.params.id.replace(/[^a-zA-Z0-9-]/g, '');
+  const bundlePath = path.join(UPLOAD_DIR, `bundle.${id}.json`);
+  if (!fs.existsSync(bundlePath)) {
+    return res.status(404).json({ error: 'Arquivos não encontrados ou já foram baixados' });
+  }
+  const bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
+  if (isBundleExpired(bundle)) {
+    deleteBundle(id, bundle);
+    return res.status(404).json({ error: 'Arquivos não encontrados ou já foram baixados' });
+  }
+  if (bundle.passwordHash) {
+    const totalSize = (bundle.files || []).reduce((s, f) => s + f.size, 0);
+    const expiresAt = (bundle.createdAt || 0) + EXPIRY_MS;
+    return res.json({ requiresPassword: true, fileCount: bundle.files?.length || 0, totalSize, expiresAt });
+  }
+  const expiresAt = (bundle.createdAt || 0) + EXPIRY_MS;
+  res.json({ files: bundle.files || [], expiresAt });
+});
+
+app.post('/api/verify/:id', express.json(), (req, res) => {
+  const id = req.params.id.replace(/[^a-zA-Z0-9-]/g, '');
+  const bundlePath = path.join(UPLOAD_DIR, `bundle.${id}.json`);
+  if (!fs.existsSync(bundlePath)) {
+    return res.status(404).json({ error: 'Arquivos não encontrados ou já foram baixados' });
+  }
+  const bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
+  if (isBundleExpired(bundle)) {
+    deleteBundle(id, bundle);
+    return res.status(404).json({ error: 'Arquivos não encontrados ou já foram baixados' });
+  }
+  const password = (req.body?.password || '').trim();
+  if (!verifyPassword(password, bundle.passwordHash)) {
+    return res.status(401).json({ error: 'Senha incorreta.' });
+  }
+  const expiresAt = (bundle.createdAt || 0) + EXPIRY_MS;
+  res.json({ files: bundle.files || [], expiresAt });
+});
+
+function streamZip(res, bundlePath, bundle, files) {
+  const zipFilename = files.length === 1
+    ? path.basename(files[0].originalName, path.extname(files[0].originalName)) + '.zip'
+    : 'arquivos.zip';
+  res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
+  res.setHeader('Content-Type', 'application/zip');
+  const archive = archiver('zip', { zlib: { level: 1 } });
+  archive.on('error', (err) => { console.error('Erro ao criar ZIP:', err); res.status(500).end(); });
+  res.on('finish', () => {
+    try {
+      for (const f of files) {
+        const ext = path.extname(f.originalName) || '';
+        const filePath = path.join(UPLOAD_DIR, `${f.id}${ext}`);
+        const metaPath = path.join(UPLOAD_DIR, `${f.id}.meta.json`);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath);
+      }
+      if (fs.existsSync(bundlePath)) fs.unlinkSync(bundlePath);
+    } catch (e) { console.error('Erro ao remover arquivos:', e); }
+  });
+  archive.pipe(res);
+  for (const f of files) {
+    const ext = path.extname(f.originalName) || '';
+    const filePath = path.join(UPLOAD_DIR, `${f.id}${ext}`);
+    if (fs.existsSync(filePath)) archive.file(filePath, { name: f.originalName });
+  }
+  archive.finalize();
+}
+
+app.get('/download/:id', (req, res) => {
+  const id = req.params.id.replace(/[^a-zA-Z0-9-]/g, '');
+  const bundlePath = path.join(UPLOAD_DIR, `bundle.${id}.json`);
+  if (!fs.existsSync(bundlePath)) {
+    return res.status(404).send('Arquivos não encontrados ou já foram baixados.');
+  }
+  const bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
+  if (isBundleExpired(bundle)) {
+    deleteBundle(id, bundle);
+    return res.status(404).send('Arquivos não encontrados ou já foram baixados.');
+  }
+  if (bundle.passwordHash) {
+    return res.status(401).send('Senha necessária. Use a página de compartilhamento.');
+  }
+  const files = bundle.files || [];
+  if (files.length === 0) return res.status(404).send('Nenhum arquivo no pacote.');
+  streamZip(res, bundlePath, bundle, files);
+});
+
+app.post('/download/:id', express.json(), (req, res) => {
+  const id = req.params.id.replace(/[^a-zA-Z0-9-]/g, '');
+  const bundlePath = path.join(UPLOAD_DIR, `bundle.${id}.json`);
+  if (!fs.existsSync(bundlePath)) {
+    return res.status(404).json({ error: 'Arquivos não encontrados ou já foram baixados.' });
+  }
+  const bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
+  if (isBundleExpired(bundle)) {
+    deleteBundle(id, bundle);
+    return res.status(404).json({ error: 'Arquivos não encontrados ou já foram baixados.' });
+  }
+  const password = (req.body?.password || '').trim();
+  if (!verifyPassword(password, bundle.passwordHash)) {
+    return res.status(401).json({ error: 'Senha incorreta.' });
+  }
+  const files = bundle.files || [];
+  if (files.length === 0) {
+    return res.status(404).json({ error: 'Nenhum arquivo no pacote.' });
+  }
+  streamZip(res, bundlePath, bundle, files);
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Servidor rodando em http://localhost:${PORT}`);
+  console.log(`Links expiram após ${EXPIRY_HOURS}h. Use pnpm run cleanup para remover expirados.`);
+});

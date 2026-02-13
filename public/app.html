@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TimTransfer - Enviar arquivos</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif; }
+    body { background: #f5f5f7; }
+    .glass { background: rgba(255,255,255,0.8); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+    .glass-border { border: 1px solid rgba(0,0,0,0.04); }
+    .shadow-soft { box-shadow: 0 2px 16px rgba(0,0,0,0.04), 0 4px 32px rgba(0,0,0,0.03); }
+    .shadow-soft-hover:hover { box-shadow: 0 4px 24px rgba(0,0,0,0.06), 0 8px 48px rgba(0,0,0,0.04); }
+    .drop-zone.drag-over { background: rgba(0,113,227,0.06); border-color: rgba(0,113,227,0.3); }
+    .btn-primary { background: #0071e3; color: white; }
+    .btn-primary:hover { background: #0077ed; }
+    .pin-input:focus { box-shadow: 0 0 0 2px rgba(0,113,227,0.4); }
+    .toast { animation: fadeUp 0.25s cubic-bezier(0.4,0,0.2,1); }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body class="min-h-screen text-[#1d1d1f] flex flex-col">
+  <header class="py-6 px-6 max-w-5xl mx-auto w-full">
+    <a href="/" class="text-[17px] font-semibold tracking-tight text-[#1d1d1f] hover:text-[#0071e3] transition-colors">TimTransfer</a>
+  </header>
+
+  <main class="flex-1 py-12 px-6 flex flex-col items-center justify-center">
+    <div class="w-full max-w-[420px]">
+    <h1 class="text-[28px] font-semibold text-center tracking-tight text-[#1d1d1f] mb-10">Enviar arquivos</h1>
+
+    <div class="mb-8 p-6 rounded-2xl glass glass-border shadow-soft shadow-soft-hover transition-all duration-300">
+      <p class="text-[13px] text-[#86868b] mb-4 font-medium">Crie uma senha para os arquivos.</p>
+      <div class="flex justify-center gap-3">
+        <input type="password" id="pin0" inputmode="numeric" maxlength="1" autocomplete="off"
+          class="pin-input w-12 h-12 text-center text-[17px] font-semibold rounded-xl bg-white/60 border border-[#d2d2d7] text-[#1d1d1f] focus:outline-none focus:border-transparent transition-shadow duration-200" />
+        <input type="password" id="pin1" inputmode="numeric" maxlength="1" autocomplete="off"
+          class="pin-input w-12 h-12 text-center text-[17px] font-semibold rounded-xl bg-white/60 border border-[#d2d2d7] text-[#1d1d1f] focus:outline-none focus:border-transparent transition-shadow duration-200" />
+        <input type="password" id="pin2" inputmode="numeric" maxlength="1" autocomplete="off"
+          class="pin-input w-12 h-12 text-center text-[17px] font-semibold rounded-xl bg-white/60 border border-[#d2d2d7] text-[#1d1d1f] focus:outline-none focus:border-transparent transition-shadow duration-200" />
+        <input type="password" id="pin3" inputmode="numeric" maxlength="1" autocomplete="off"
+          class="pin-input w-12 h-12 text-center text-[17px] font-semibold rounded-xl bg-white/60 border border-[#d2d2d7] text-[#1d1d1f] focus:outline-none focus:border-transparent transition-shadow duration-200" />
+      </div>
+    </div>
+
+    <div id="dropZone" class="drop-zone hidden rounded-2xl py-16 px-8 text-center cursor-pointer transition-all duration-300 glass glass-border shadow-soft shadow-soft-hover border-2 border-dashed border-[#d2d2d7] hover:border-[#0071e3]/40">
+      <input type="file" id="fileInput" class="hidden" multiple />
+      <div class="w-14 h-14 mx-auto mb-3 rounded-2xl bg-[#0071e3]/10 flex items-center justify-center">
+        <svg class="w-7 h-7 text-[#0071e3]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+      </div>
+      <p class="text-[15px] text-[#86868b] font-medium">Arraste ou clique para enviar</p>
+    </div>
+
+    <div id="uploadProgress" class="mt-6 hidden">
+      <div class="h-1.5 bg-[#d2d2d7]/50 rounded-full overflow-hidden">
+        <div id="progressBar" class="h-full bg-[#0071e3] rounded-full transition-all duration-500 ease-out" style="width: 0%"></div>
+      </div>
+    </div>
+
+    <div id="result" class="mt-8 hidden p-6 rounded-2xl glass glass-border shadow-soft">
+      <ul id="fileList" class="mb-4 max-h-36 overflow-y-auto space-y-2 text-[15px]"></ul>
+      <p id="totalSize" class="text-[13px] text-[#86868b] mb-5 font-medium"></p>
+      <div class="flex gap-3">
+        <input type="text" id="shareUrl" readonly class="flex-1 rounded-xl px-4 py-3 text-[14px] bg-white/50 border border-[#d2d2d7] text-[#1d1d1f] truncate focus:outline-none focus:border-[#0071e3]/50" />
+        <button type="button" id="copyBtn" class="shrink-0 px-5 py-3 rounded-xl btn-primary text-[14px] font-semibold transition-colors duration-200">Copiar</button>
+      </div>
+    </div>
+
+    <div id="error" class="mt-4 py-3 px-4 rounded-xl bg-[#ff3b30]/10 text-[#ff3b30] text-[14px] hidden font-medium"></div>
+
+    <div id="toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl bg-[#1d1d1f] text-white text-[14px] font-medium shadow-soft toast hidden z-50">Copiado</div>
+    </div>
+  </main>
+
+  <footer class="mt-auto py-8 px-6 border-t border-[#d2d2d7]/50 bg-[#f5f5f7]">
+    <div class="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+      <span class="text-[13px] text-[#86868b]">TimTransfer — gratuito, simples, seguro.</span>
+      <div class="flex items-center gap-6">
+        <button type="button" id="feedbackBtn" class="text-[14px] text-[#86868b] hover:text-[#0071e3] transition-colors">
+          Enviar sugestão
+        </button>
+        <button type="button" id="coffeeBtn" class="text-[14px] text-[#86868b] hover:text-[#0071e3] transition-colors">
+          Me pague um café
+        </button>
+        <a href="https://github.com/renatoruis/timtransfer" target="_blank" rel="noopener" class="text-[14px] text-[#86868b] hover:text-[#0071e3] transition-colors flex items-center gap-1">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          Dar uma estrela
+        </a>
+      </div>
+    </div>
+  </footer>
+
+  <div id="modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 hidden">
+    <div class="bg-white rounded-2xl p-8 max-w-sm w-full shadow-xl" onclick="event.stopPropagation()">
+      <h3 class="text-[20px] font-semibold text-center mb-2">Me pague um café</h3>
+      <p class="text-[14px] text-[#86868b] text-center mb-6">Escaneie o QR code PIX</p>
+      <img src="/qrcode-pix.png" alt="QR Code PIX" class="w-48 h-48 mx-auto rounded-lg mb-6" />
+      <button type="button" id="closeModal" class="w-full py-3 rounded-xl bg-[#f5f5f7] text-[#1d1d1f] text-[15px] font-medium hover:bg-[#e8e8ed] transition-colors">
+        Fechar
+      </button>
+    </div>
+  </div>
+
+  <div id="feedbackModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 hidden">
+    <div class="bg-white rounded-2xl p-8 max-w-md w-full shadow-xl max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
+      <div class="flex justify-between items-center mb-6">
+        <h3 class="text-[20px] font-semibold text-[#1d1d1f]">Enviar sugestão</h3>
+        <button type="button" id="feedbackClose" class="text-[#86868b] hover:text-[#1d1d1f] p-1 rounded-lg transition-colors">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-[14px] text-[#86868b] mb-4">Envie uma sugestão, melhoria, crítica ou peça suporte. Resposta apenas se informar e-mail.</p>
+      <form id="feedbackForm">
+        <div class="mb-4">
+          <label class="block text-[13px] font-medium text-[#1d1d1f] mb-2">Tipo</label>
+          <select id="feedbackType" class="w-full rounded-xl px-4 py-3 text-[15px] bg-[#f5f5f7] border border-[#d2d2d7] text-[#1d1d1f] focus:outline-none focus:border-[#0071e3]/50">
+            <option value="sugestao">Sugestão</option>
+            <option value="melhoria">Melhoria</option>
+            <option value="critica">Crítica</option>
+            <option value="suporte">Suporte</option>
+          </select>
+        </div>
+        <div class="mb-4">
+          <label class="block text-[13px] font-medium text-[#1d1d1f] mb-2">E-mail (opcional)</label>
+          <input type="email" id="feedbackEmail" class="w-full rounded-xl px-4 py-3 text-[15px] bg-[#f5f5f7] border border-[#d2d2d7] text-[#1d1d1f] focus:outline-none focus:border-[#0071e3]/50" placeholder="seu@email.com">
+        </div>
+        <div class="mb-4">
+          <label class="block text-[13px] font-medium text-[#1d1d1f] mb-2">Mensagem</label>
+          <textarea id="feedbackMessage" name="message" rows="4" required class="w-full rounded-xl px-4 py-3 text-[15px] bg-[#f5f5f7] border border-[#d2d2d7] text-[#1d1d1f] focus:outline-none focus:border-[#0071e3]/50 resize-none" placeholder="Descreva sua sugestão, melhoria, crítica ou pedido de suporte..."></textarea>
+        </div>
+        <p id="feedbackError" class="text-[#ff3b30] text-[14px] mb-3 hidden"></p>
+        <p id="feedbackSuccessMsg" class="text-[#34c759] text-[14px] mb-3 hidden">Enviado! Obrigado pelo feedback.</p>
+        <div class="flex gap-3">
+          <button type="button" id="feedbackCloseBtn" class="flex-1 py-3 rounded-xl bg-[#f5f5f7] text-[#1d1d1f] text-[15px] font-medium hover:bg-[#e8e8ed] transition-colors">Cancelar</button>
+          <button type="submit" id="feedbackSubmit" class="flex-1 py-3 rounded-xl bg-[#0071e3] hover:bg-[#0077ed] text-white text-[15px] font-medium transition-colors">Enviar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/feedback.js"></script>
+  <script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const result = document.getElementById('result');
+    const fileList = document.getElementById('fileList');
+    const totalSize = document.getElementById('totalSize');
+    const shareUrl = document.getElementById('shareUrl');
+    const copyBtn = document.getElementById('copyBtn');
+    const errorEl = document.getElementById('error');
+    const uploadProgress = document.getElementById('uploadProgress');
+    const toast = document.getElementById('toast');
+
+    const MAX_SESSION_BYTES = 100 * 1024 * 1024;
+
+    function formatBytes(n) {
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+      return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+    function escapeHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+    function renderFileList(files) {
+      fileList.innerHTML = '';
+      let sum = 0;
+      files.forEach(f => {
+        const li = document.createElement('li');
+        li.className = 'flex justify-between py-1';
+        li.innerHTML = '<span class="truncate mr-3 text-[#1d1d1f]" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span><span class="text-[#86868b] shrink-0 text-[13px] font-medium">' + formatBytes(f.size) + '</span>';
+        fileList.appendChild(li);
+        sum += f.size;
+      });
+      totalSize.textContent = files.length + ' arquivo(s) · ' + formatBytes(sum);
+    }
+
+    function showError(msg) {
+      errorEl.textContent = msg;
+      errorEl.classList.remove('hidden');
+    }
+    function hideError() {
+      errorEl.classList.add('hidden');
+    }
+    function showToast(msg) {
+      toast.textContent = msg || 'Copiado';
+      toast.classList.remove('hidden');
+      setTimeout(() => toast.classList.add('hidden'), 1800);
+    }
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length) handleFiles(files);
+    });
+    fileInput.addEventListener('change', () => {
+      const files = Array.from(fileInput.files || []);
+      if (files.length) handleFiles(files);
+      fileInput.value = '';
+    });
+
+    function handleFiles(files) {
+      hideError();
+      if (files.length === 0) return;
+      const password = getPinValue();
+      if (!/^\d{4}$/.test(password)) {
+        showError('Senha inválida. Use 4 números.');
+        return;
+      }
+      const total = files.reduce((s, f) => s + f.size, 0);
+      if (total > MAX_SESSION_BYTES) {
+        showError('Limite: 100MB por sessão.');
+        return;
+      }
+
+      result.classList.add('hidden');
+      uploadProgress.classList.remove('hidden');
+
+      const formData = new FormData();
+      formData.append('password', password);
+      files.forEach(f => formData.append('file', f));
+
+      fetch('/upload', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+          uploadProgress.classList.add('hidden');
+          if (data.error) {
+            showError(data.error);
+            return;
+          }
+          shareUrl.value = data.url;
+          renderFileList(data.files || []);
+          result.classList.remove('hidden');
+        })
+        .catch(() => {
+          uploadProgress.classList.add('hidden');
+          showError('Erro ao enviar.');
+        });
+    }
+
+    const pinInputs = [document.getElementById('pin0'), document.getElementById('pin1'), document.getElementById('pin2'), document.getElementById('pin3')];
+    function getPinValue() {
+      return pinInputs.map(i => i.value).join('');
+    }
+    function updateDropZoneVisibility() {
+      if (getPinValue().length === 4) {
+        dropZone.classList.remove('hidden');
+      } else {
+        dropZone.classList.add('hidden');
+      }
+    }
+    pinInputs.forEach((inp, i) => {
+      inp.addEventListener('input', (e) => {
+        const v = e.target.value.replace(/\D/g, '').slice(0, 1);
+        e.target.value = v;
+        if (v && i < 3) pinInputs[i + 1].focus();
+        updateDropZoneVisibility();
+      });
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && !e.target.value && i > 0) pinInputs[i - 1].focus();
+        setTimeout(updateDropZoneVisibility, 0);
+      });
+      inp.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const pasted = (e.clipboardData?.getData('text') || '').replace(/\D/g, '').slice(0, 4);
+        pasted.split('').forEach((ch, j) => { if (pinInputs[j]) pinInputs[j].value = ch; });
+        if (pasted.length > 0) pinInputs[Math.min(pasted.length - 1, 3)].focus();
+        updateDropZoneVisibility();
+      });
+    });
+
+    copyBtn.addEventListener('click', () => {
+      if (shareUrl.value) {
+        navigator.clipboard.writeText(shareUrl.value);
+        showToast('Copiado');
+        copyBtn.textContent = 'Copiado';
+        setTimeout(() => { copyBtn.textContent = 'Copiar'; }, 1500);
+      }
+    });
+
+    var modal = document.getElementById('modal');
+    var coffeeBtn = document.getElementById('coffeeBtn');
+    var closeModal = document.getElementById('closeModal');
+    coffeeBtn.addEventListener('click', function() { modal.classList.remove('hidden'); });
+    closeModal.addEventListener('click', function() { modal.classList.add('hidden'); });
+    modal.addEventListener('click', function(e) { if (e.target === modal) modal.classList.add('hidden'); });
+    document.addEventListener('keydown', function(e) { if (e.key === 'Escape') modal.classList.add('hidden'); });
+  </script>
+</body>
+</html>
