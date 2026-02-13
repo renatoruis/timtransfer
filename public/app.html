@@ -21,7 +21,7 @@
   </style>
 </head>
 <body class="min-h-screen text-[#1d1d1f] flex flex-col">
-  <header class="py-6 px-6 max-w-5xl mx-auto w-full flex justify-center">
+  <header class="mt-4 px-6 max-w-5xl mx-auto w-full flex justify-center">
     <a href="/" class="inline-block">
       <img src="/images/TimTransferLogo.png" alt="TimTransfer — fácil, grátis e seguro" class="h-16" />
     </a>
@@ -45,12 +45,21 @@
       </div>
     </div>
 
-    <div id="dropZone" class="drop-zone hidden rounded-2xl py-16 px-8 text-center cursor-pointer transition-all duration-300 glass glass-border shadow-soft shadow-soft-hover border-2 border-dashed border-[#d2d2d7] hover:border-[#0071e3]/40">
+    <div id="dropZone" class="drop-zone hidden rounded-2xl py-12 px-8 text-center cursor-pointer transition-all duration-300 glass glass-border shadow-soft shadow-soft-hover border-2 border-dashed border-[#d2d2d7] hover:border-[#0071e3]/40">
       <input type="file" id="fileInput" class="hidden" multiple />
-      <div class="w-14 h-14 mx-auto mb-3 rounded-2xl bg-[#0071e3]/10 flex items-center justify-center">
-        <svg class="w-7 h-7 text-[#0071e3]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+      <div class="w-12 h-12 mx-auto mb-2 rounded-2xl bg-[#0071e3]/10 flex items-center justify-center">
+        <svg class="w-6 h-6 text-[#0071e3]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4"/></svg>
       </div>
-      <p class="text-[15px] text-[#86868b] font-medium">Arraste ou clique para enviar</p>
+      <p id="dropZoneText" class="text-[15px] text-[#86868b] font-medium">Arraste ou clique para adicionar arquivos</p>
+    </div>
+
+    <div id="pendingFiles" class="mt-4 hidden p-4 rounded-2xl glass glass-border shadow-soft">
+      <p class="text-[13px] text-[#86868b] font-medium mb-3">Arquivos selecionados</p>
+      <ul id="pendingFileList" class="mb-3 max-h-36 overflow-y-auto space-y-2 text-[15px]"></ul>
+      <p id="pendingTotal" class="text-[13px] text-[#86868b] mb-3 font-medium"></p>
+      <button type="button" id="uploadBtn" class="w-full py-3 rounded-xl bg-[#0071e3] hover:bg-[#0077ed] text-white text-[15px] font-semibold transition-colors">
+        Enviar arquivos
+      </button>
     </div>
 
     <div id="uploadProgress" class="mt-6 hidden p-4 rounded-2xl glass glass-border shadow-soft">
@@ -154,6 +163,11 @@
   <script>
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
+    const dropZoneText = document.getElementById('dropZoneText');
+    const pendingFiles = document.getElementById('pendingFiles');
+    const pendingFileList = document.getElementById('pendingFileList');
+    const pendingTotal = document.getElementById('pendingTotal');
+    const uploadBtn = document.getElementById('uploadBtn');
     const result = document.getElementById('result');
     const fileList = document.getElementById('fileList');
     const totalSize = document.getElementById('totalSize');
@@ -204,29 +218,12 @@
       setTimeout(() => toast.classList.add('hidden'), 1800);
     }
 
-    dropZone.addEventListener('click', () => fileInput.click());
-    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-    dropZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropZone.classList.remove('drag-over');
-      const files = Array.from(e.dataTransfer.files);
-      if (files.length) handleFiles(files);
-    });
-    fileInput.addEventListener('change', () => {
-      const files = Array.from(fileInput.files || []);
-      if (files.length) handleFiles(files);
-      fileInput.value = '';
-    });
+    let selectedFiles = [];
 
-    function handleFiles(files) {
+    function addFiles(newFiles) {
       hideError();
+      const files = Array.from(newFiles || []);
       if (files.length === 0) return;
-      const password = getPinValue();
-      if (!/^\d{4}$/.test(password)) {
-        showError('Senha inválida. Use 4 números.');
-        return;
-      }
       const blocked = files.find(f => {
         const name = f.name || '';
         const ext = (name.includes('.') ? '.' + name.split('.').pop() : '').toLowerCase();
@@ -236,23 +233,79 @@
         showError('Tipo de arquivo não permitido: ' + (blocked.name || 'arquivo'));
         return;
       }
-      const total = files.reduce((s, f) => s + f.size, 0);
+      const newTotal = selectedFiles.reduce((s, f) => s + f.size, 0) + files.reduce((s, f) => s + f.size, 0);
+      if (newTotal > MAX_SESSION_BYTES) {
+        showError('Limite: 100MB no total. Adicione menos arquivos.');
+        return;
+      }
+      selectedFiles.push(...files);
+      renderPendingFiles();
+    }
+
+    function renderPendingFiles() {
+      pendingFileList.innerHTML = '';
+      if (selectedFiles.length === 0) {
+        pendingFiles.classList.add('hidden');
+        dropZoneText.textContent = 'Arraste ou clique para adicionar arquivos';
+        return;
+      }
+      pendingFiles.classList.remove('hidden');
+      dropZoneText.textContent = 'Adicionar mais arquivos';
+      const total = selectedFiles.reduce((s, f) => s + f.size, 0);
+      selectedFiles.forEach((f, i) => {
+        const li = document.createElement('li');
+        li.className = 'flex justify-between items-center py-1.5';
+        li.innerHTML = '<span class="truncate mr-2 text-[#1d1d1f]" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span>' +
+          '<span class="flex items-center gap-2 shrink-0"><span class="text-[#86868b] text-[13px] font-medium">' + formatBytes(f.size) + '</span>' +
+          '<button type="button" data-i="' + i + '" class="remove-file text-[#ff3b30] hover:text-[#ff3b30]/80 text-sm font-medium px-1.5 py-0.5 rounded hover:bg-[#ff3b30]/10" title="Remover">✕</button></span>';
+        pendingFileList.appendChild(li);
+      });
+      pendingTotal.textContent = selectedFiles.length + ' arquivo(s) · ' + formatBytes(total);
+      pendingFileList.querySelectorAll('.remove-file').forEach(btn => {
+        btn.addEventListener('click', () => {
+          selectedFiles.splice(parseInt(btn.dataset.i, 10), 1);
+          renderPendingFiles();
+        });
+      });
+    }
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      addFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', () => {
+      addFiles(fileInput.files);
+      fileInput.value = '';
+    });
+
+    uploadBtn.addEventListener('click', function doUpload() {
+      if (selectedFiles.length === 0) return;
+      const password = getPinValue();
+      if (!/^\d{4}$/.test(password)) {
+        showError('Senha inválida. Use 4 números.');
+        return;
+      }
+      const total = selectedFiles.reduce((s, f) => s + f.size, 0);
       if (total > MAX_SESSION_BYTES) {
         showError('Limite: 100MB por sessão.');
         return;
       }
 
       result.classList.add('hidden');
+      pendingFiles.classList.add('hidden');
       uploadProgress.classList.remove('hidden');
       progressBar.style.width = '0%';
       progressText.textContent = 'Enviando arquivos...';
 
       const formData = new FormData();
       formData.append('password', password);
-      files.forEach(f => formData.append('file', f));
+      selectedFiles.forEach(f => formData.append('file', f));
 
       const xhr = new XMLHttpRequest();
-
       xhr.upload.addEventListener('progress', function(e) {
         if (e.lengthComputable) {
           const pct = Math.round((e.loaded / e.total) * 100);
@@ -262,9 +315,10 @@
           progressText.textContent = 'Enviando... ' + loaded + ' de ' + totalStr + ' (' + pct + '%)';
         }
       });
-
       xhr.addEventListener('load', function() {
         uploadProgress.classList.add('hidden');
+        selectedFiles = [];
+        renderPendingFiles();
         try {
           const data = JSON.parse(xhr.responseText);
           if (data.error) {
@@ -278,15 +332,13 @@
           showError('Erro ao enviar.');
         }
       });
-
       xhr.addEventListener('error', function() {
         uploadProgress.classList.add('hidden');
         showError('Erro ao enviar.');
       });
-
       xhr.open('POST', '/upload');
       xhr.send(formData);
-    }
+    });
 
     const pinInputs = [document.getElementById('pin0'), document.getElementById('pin1'), document.getElementById('pin2'), document.getElementById('pin3')];
     function getPinValue() {
@@ -297,6 +349,8 @@
         dropZone.classList.remove('hidden');
       } else {
         dropZone.classList.add('hidden');
+        selectedFiles = [];
+        renderPendingFiles();
       }
     }
     pinInputs.forEach((inp, i) => {
