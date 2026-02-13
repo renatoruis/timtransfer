@@ -1,12 +1,11 @@
 services:
   app:
-    build: .
+    image: ghcr.io/renatoruis/timtransfer:main
     ports:
       - "9090:9090"
     environment:
       - PORT=9090
     volumes:
-      - uploads_data:/app/uploads
-
-volumes:
-  uploads_data:
+      - .env:/app/.env
+      - ./uploads:/app/uploads
+      - ./feedback:/app/feedback
