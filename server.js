@@ -73,6 +73,28 @@ function formatUptime(seconds) {
   return parts.join(' ');
 }
 
+function getFeedbackList() {
+  const feedbackDir = path.join(__dirname, 'feedback');
+  if (!fs.existsSync(feedbackDir)) return [];
+  const files = fs.readdirSync(feedbackDir).filter(f => f.startsWith('feedback_') && f.endsWith('.json'));
+  const list = [];
+  for (const file of files.sort().reverse()) {
+    try {
+      const fp = path.join(feedbackDir, file);
+      const data = JSON.parse(fs.readFileSync(fp, 'utf8'));
+      list.push({ file, ...data });
+    } catch (e) {
+      list.push({ file, error: 'Erro ao ler' });
+    }
+  }
+  return list;
+}
+
+function escapeHtml(s) {
+  if (typeof s !== 'string') return '';
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
@@ -213,6 +235,66 @@ app.get('/status', (req, res) => {
     </div>
     <p class="mt-6 text-sm text-[#86868b]">
       <a href="/status?token=${encodeURIComponent(token)}" class="text-[#0071e3] hover:underline">Atualizar</a>
+      &nbsp;·&nbsp;
+      <a href="/feedback?token=${encodeURIComponent(token)}" class="text-[#0071e3] hover:underline">Feedbacks</a>
+      &nbsp;·&nbsp;
+      <a href="/" class="text-[#0071e3] hover:underline">Voltar</a>
+    </p>
+  </div>
+</body>
+</html>`;
+  res.send(html);
+});
+
+app.get('/feedback', (req, res) => {
+  const token = (req.query.token || '').trim();
+  if (!STATUS_SECRET || token !== STATUS_SECRET) {
+    return res.status(403).send('Acesso negado.');
+  }
+  const feedbacks = getFeedbackList();
+  const typeLabel = { sugestao: 'Sugestão', melhoria: 'Melhoria', critica: 'Crítica', suporte: 'Suporte' };
+  const itemsHtml = feedbacks.map(f => {
+    const type = typeLabel[f.type] || f.type || '-';
+    const date = f.createdAt ? new Date(f.createdAt).toLocaleString('pt-BR') : '-';
+    const email = escapeHtml(f.email || '(sem e-mail)');
+    const msg = escapeHtml(f.message || '').replace(/\n/g, '<br>');
+    if (f.error) {
+      return `<div class="bg-white rounded-xl p-4 shadow-sm border border-[#d2d2d7]/50">
+        <p class="text-[#ff3b30] text-sm">${escapeHtml(f.file)} — ${f.error}</p>
+      </div>`;
+    }
+    return `<div class="bg-white rounded-xl p-4 shadow-sm border border-[#d2d2d7]/50">
+      <div class="flex justify-between items-start gap-4 mb-2">
+        <span class="text-xs font-medium px-2 py-0.5 rounded bg-[#0071e3]/10 text-[#0071e3]">${type}</span>
+        <span class="text-[13px] text-[#86868b] shrink-0">${date}</span>
+      </div>
+      <p class="text-[15px] text-[#1d1d1f] mb-2">${msg}</p>
+      <p class="text-[13px] text-[#86868b]">${email}</p>
+    </div>`;
+  }).join('\n');
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Feedbacks — TimTransfer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+  </style>
+</head>
+<body class="bg-[#f5f5f7] min-h-screen p-8 text-[#1d1d1f]">
+  <div class="max-w-2xl mx-auto">
+    <h1 class="text-2xl font-semibold mb-2">Feedbacks</h1>
+    <p class="text-[#86868b] text-sm mb-6">${feedbacks.length} registro(s)</p>
+    <div class="space-y-4">
+      ${itemsHtml || '<p class="text-[#86868b] text-sm">Nenhum feedback ainda.</p>'}
+    </div>
+    <p class="mt-6 text-sm text-[#86868b]">
+      <a href="/feedback?token=${encodeURIComponent(token)}" class="text-[#0071e3] hover:underline">Atualizar</a>
+      &nbsp;·&nbsp;
+      <a href="/status?token=${encodeURIComponent(token)}" class="text-[#0071e3] hover:underline">Status</a>
       &nbsp;·&nbsp;
       <a href="/" class="text-[#0071e3] hover:underline">Voltar</a>
     </p>

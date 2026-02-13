@@ -91,7 +91,8 @@ docker run -p 9090:9090 ghcr.io/renatoruis/timtransfer:main
 | `/api/share/:id` | Share metadata (JSON)     |
 | `/api/verify/:id`| Verify PIN (JSON)        |
 | `/download/:id`  | ZIP download             |
-| `/status?token=` | Status (técnicos)        |
+| `/status?token=`  | Status (técnicos)         |
+| `/feedback?token=`| Feedbacks (técnicos)      |
 
 ## License
 
