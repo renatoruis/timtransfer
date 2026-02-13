@@ -99,13 +99,16 @@
     fetch('/download/' + bundleId)
       .then(function(r) {
         if (!r.ok) throw new Error('Erro ao baixar');
-        return r.blob();
+        var disp = r.headers.get('Content-Disposition');
+        var m = disp && disp.match(/filename="?([^";\s]+)"?/);
+        var filename = m ? m[1] : 'timtransfer-file-download.zip';
+        return r.blob().then(function(blob) { return { blob: blob, filename: filename }; });
       })
-      .then(function(blob) {
-        var url = URL.createObjectURL(blob);
+      .then(function(o) {
+        var url = URL.createObjectURL(o.blob);
         var a = document.createElement('a');
         a.href = url;
-        a.download = 'arquivos.zip';
+        a.download = o.filename;
         a.click();
         URL.revokeObjectURL(url);
         showDownloadSuccess();
@@ -132,13 +135,16 @@
             throw new Error(j.error || 'Erro');
           });
         }
-        return r.blob();
+        var disp = r.headers.get('Content-Disposition');
+        var m = disp && disp.match(/filename="?([^";\s]+)"?/);
+        var filename = m ? m[1] : 'timtransfer-file-download.zip';
+        return r.blob().then(function(blob) { return { blob: blob, filename: filename }; });
       })
-      .then(function(blob) {
-        var url = URL.createObjectURL(blob);
+      .then(function(o) {
+        var url = URL.createObjectURL(o.blob);
         var a = document.createElement('a');
         a.href = url;
-        a.download = 'arquivos.zip';
+        a.download = o.filename;
         a.click();
         URL.revokeObjectURL(url);
         showDownloadSuccess();

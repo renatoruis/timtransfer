@@ -27,6 +27,11 @@ const MAX_SESSION_SIZE = 100 * 1024 * 1024; // 100MB por sessão (soma de todos 
 const MAX_UPLOADS_DISK_MB = parseInt(process.env.MAX_UPLOADS_DISK_MB || '1024', 10) || 1024;
 const MAX_UPLOADS_DISK_BYTES = MAX_UPLOADS_DISK_MB * 1024 * 1024;
 
+const BLOCKED_EXTENSIONS = new Set([
+  '.exe', '.com', '.bat', '.cmd', '.msi', '.scr', '.vbs', '.ps1', '.pif', '.hta',
+  '.cpl', '.msc', '.jar', '.dll', '.sys', '.reg', '.inf', '.wsf', '.vbe', '.jse'
+].map(e => e.toLowerCase()));
+
 function getUploadsDirSize() {
   let total = 0;
   try {
@@ -79,7 +84,14 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: MAX_SESSION_SIZE }
+  limits: { fileSize: MAX_SESSION_SIZE },
+  fileFilter: (req, file, cb) => {
+    const ext = (path.extname(file.originalname || '') || '').toLowerCase();
+    if (BLOCKED_EXTENSIONS.has(ext)) {
+      return cb(new Error('Tipo de arquivo não permitido: ' + (ext || '(sem extensão)')));
+    }
+    cb(null, true);
+  }
 }).array('file', 50);
 
 app.use(express.json());
@@ -336,9 +348,13 @@ app.post('/api/verify/:id', express.json(), (req, res) => {
 });
 
 function streamZip(res, bundlePath, bundle, files) {
-  const zipFilename = files.length === 1
-    ? path.basename(files[0].originalName, path.extname(files[0].originalName)) + '.zip'
-    : 'arquivos.zip';
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+  let baseName = files.length === 1
+    ? path.basename(files[0].originalName, path.extname(files[0].originalName))
+    : 'arquivos';
+  baseName = baseName.replace(/[\/\\:*?"<>|]/g, '-').slice(0, 80) || 'file-download';
+  const zipFilename = `timtransfer-${dateStr}-${baseName}.zip`;
   res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
   res.setHeader('Content-Type', 'application/zip');
   const archive = archiver('zip', { zlib: { level: 1 } });

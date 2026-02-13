@@ -9,6 +9,7 @@ Simple, free, and secure file transfer. No account required.
 - **Free** — No limits, no registration
 - **Simple** — 4-digit PIN, one shared link
 - **Secure** — Files expire; password required for upload and download
+- **Protected** — Dangerous file types (.exe, .bat, .msi, etc.) are blocked
 
 ## How it works
 

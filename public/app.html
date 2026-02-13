@@ -166,6 +166,7 @@
     const toast = document.getElementById('toast');
 
     const MAX_SESSION_BYTES = 100 * 1024 * 1024;
+    const BLOCKED_EXT = ['.exe','.com','.bat','.cmd','.msi','.scr','.vbs','.ps1','.pif','.hta','.cpl','.msc','.jar','.dll','.sys','.reg','.inf','.wsf','.vbe','.jse'];
 
     function formatBytes(n) {
       if (n < 1024) return n + ' B';
@@ -224,6 +225,15 @@
       const password = getPinValue();
       if (!/^\d{4}$/.test(password)) {
         showError('Senha inválida. Use 4 números.');
+        return;
+      }
+      const blocked = files.find(f => {
+        const name = f.name || '';
+        const ext = (name.includes('.') ? '.' + name.split('.').pop() : '').toLowerCase();
+        return ext && BLOCKED_EXT.includes(ext);
+      });
+      if (blocked) {
+        showError('Tipo de arquivo não permitido: ' + (blocked.name || 'arquivo'));
         return;
       }
       const total = files.reduce((s, f) => s + f.size, 0);
