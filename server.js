@@ -7,6 +7,7 @@ const multer = require('multer');
 const archiver = require('archiver');
 const { v4: uuidv4 } = require('uuid');
 const { isBundleExpired, deleteBundle, EXPIRY_HOURS, EXPIRY_MS } = require('./lib/expiry');
+const { increment, getMetrics, toPrometheusFormat } = require('./lib/metrics');
 
 function hashPassword(pwd) {
   return crypto.createHash('sha256').update(pwd).digest('hex');
@@ -171,6 +172,7 @@ app.post('/api/feedback', express.json(), async (req, res) => {
   const filePath = path.join(feedbackDir, `feedback_${Date.now()}.json`);
   try {
     fs.writeFileSync(filePath, JSON.stringify(feedback, null, 2));
+    increment('feedbacks_total');
   } catch (e) {
     console.error('Erro ao salvar feedback:', e);
   }
@@ -194,6 +196,7 @@ app.get('/status', (req, res) => {
   const bundleCount = getBundleCount();
   const mem = process.memoryUsage();
   const uptime = process.uptime();
+  const metrics = getMetrics();
   const html = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -233,9 +236,28 @@ app.get('/status', (req, res) => {
         <h2 class="text-sm font-medium text-[#86868b] mb-1">Config</h2>
         <p class="text-sm">Expiração: ${EXPIRY_HOURS}h | Limite disco: ${MAX_UPLOADS_DISK_MB} MB</p>
       </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-[#d2d2d7]/50">
+        <h2 class="text-sm font-medium text-[#86868b] mb-3">Métricas</h2>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div><span class="text-[#86868b]">Uploads:</span> <span class="font-semibold">${metrics.uploads_total || 0}</span></div>
+          <div><span class="text-[#86868b]">Downloads:</span> <span class="font-semibold">${metrics.downloads_total || 0}</span></div>
+          <div><span class="text-[#86868b]">Links visualizados:</span> <span class="font-semibold">${metrics.shares_viewed || 0}</span></div>
+          <div><span class="text-[#86868b]">API share:</span> <span class="font-semibold">${metrics.api_share_requests || 0}</span></div>
+          <div><span class="text-[#86868b]">Verificação senha:</span> <span class="font-semibold">${metrics.password_verify_attempts || 0}</span></div>
+          <div><span class="text-[#86868b]">Feedbacks:</span> <span class="font-semibold">${metrics.feedbacks_total || 0}</span></div>
+          <div><span class="text-[#86868b]">Erros upload:</span> <span class="font-semibold text-[#ff3b30]">${metrics.upload_errors || 0}</span></div>
+          <div><span class="text-[#86868b]">Erros download:</span> <span class="font-semibold text-[#ff3b30]">${(metrics.download_errors_404 || 0) + (metrics.download_errors_auth || 0)}</span></div>
+        </div>
+        <div class="mt-3 pt-3 border-t border-[#d2d2d7]/50">
+          <p class="text-xs text-[#86868b]">Dados enviados: ${formatBytes(metrics.bytes_uploaded || 0)} · Dados baixados: ${formatBytes(metrics.bytes_downloaded || 0)}</p>
+          ${metrics.last_updated ? `<p class="text-xs text-[#86868b] mt-1">Última atualização: ${new Date(metrics.last_updated).toLocaleString('pt-BR')}</p>` : ''}
+        </div>
+      </div>
     </div>
     <p class="mt-6 text-sm text-[#86868b]">
       <a href="/status?token=${encodeURIComponent(token)}" class="text-[#0071e3] hover:underline">Atualizar</a>
+      &nbsp;·&nbsp;
+      <a href="/metrics?token=${encodeURIComponent(token)}" class="text-[#0071e3] hover:underline">Prometheus</a>
       &nbsp;·&nbsp;
       <a href="/feedback?token=${encodeURIComponent(token)}" class="text-[#0071e3] hover:underline">Feedbacks</a>
       &nbsp;·&nbsp;
@@ -245,6 +267,16 @@ app.get('/status', (req, res) => {
 </body>
 </html>`;
   res.send(html);
+});
+
+app.get('/metrics', (req, res) => {
+  const token = (req.query.token || '').trim();
+  if (!STATUS_SECRET || token !== STATUS_SECRET) {
+    return res.status(403).send('Acesso negado.');
+  }
+  const metrics = getMetrics();
+  res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.send(toPrometheusFormat(metrics));
 });
 
 app.get('/feedback', (req, res) => {
@@ -308,11 +340,13 @@ app.get('/feedback', (req, res) => {
 app.post('/upload', (req, res) => {
   upload(req, res, (err) => {
     if (err) {
+      increment('upload_errors');
       const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Arquivo individual maior que 100MB.' : (err.message || 'Erro no upload');
       return res.status(400).json({ error: msg });
     }
     const uploadsDirSize = getUploadsDirSize();
     if (uploadsDirSize > MAX_UPLOADS_DISK_BYTES) {
+      increment('upload_errors');
       const files = req.files || [];
       for (const file of files) {
         const filePath = path.join(UPLOAD_DIR, file.filename);
@@ -324,6 +358,7 @@ app.post('/upload', (req, res) => {
     }
     const password = (req.body?.password || '').trim();
     if (!/^\d{4}$/.test(password)) {
+      increment('upload_errors');
       const files = req.files || [];
       for (const file of files) {
         const filePath = path.join(UPLOAD_DIR, file.filename);
@@ -333,10 +368,12 @@ app.post('/upload', (req, res) => {
     }
     const files = req.files || [];
     if (files.length === 0) {
+      increment('upload_errors');
       return res.status(400).json({ error: 'Nenhum arquivo enviado' });
     }
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
     if (totalSize > MAX_SESSION_SIZE) {
+      increment('upload_errors');
       for (const file of files) {
         const filePath = path.join(UPLOAD_DIR, file.filename);
         try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (e) { console.error(e); }
@@ -369,6 +406,8 @@ app.post('/upload', (req, res) => {
 
     const url = `${req.protocol}://${req.get('host')}/share/${bundleId}`;
     const fileList = bundleMeta.files.map(f => ({ name: f.originalName, size: f.size }));
+    increment('uploads_total');
+    increment('bytes_uploaded', totalSize);
     res.json({ url, bundleId, files: fileList });
   });
 });
@@ -384,6 +423,7 @@ app.get('/share/:id', (req, res) => {
     deleteBundle(id, bundle);
     return res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
   }
+  increment('shares_viewed');
   res.sendFile(path.join(__dirname, 'public', 'share.html'), {
     headers: { 'Cache-Control': 'no-store' }
   }, (err) => {
@@ -394,6 +434,7 @@ app.get('/share/:id', (req, res) => {
 app.get('/api/share/:id', (req, res) => {
   const id = req.params.id.replace(/[^a-zA-Z0-9-]/g, '');
   const bundlePath = path.join(UPLOAD_DIR, `bundle.${id}.json`);
+  increment('api_share_requests');
   if (!fs.existsSync(bundlePath)) {
     return res.status(404).json({ error: 'Arquivos não encontrados ou já foram baixados' });
   }
@@ -414,6 +455,7 @@ app.get('/api/share/:id', (req, res) => {
 app.post('/api/verify/:id', express.json(), (req, res) => {
   const id = req.params.id.replace(/[^a-zA-Z0-9-]/g, '');
   const bundlePath = path.join(UPLOAD_DIR, `bundle.${id}.json`);
+  increment('password_verify_attempts');
   if (!fs.existsSync(bundlePath)) {
     return res.status(404).json({ error: 'Arquivos não encontrados ou já foram baixados' });
   }
@@ -424,13 +466,18 @@ app.post('/api/verify/:id', express.json(), (req, res) => {
   }
   const password = (req.body?.password || '').trim();
   if (!verifyPassword(password, bundle.passwordHash)) {
+    increment('password_verify_fail');
     return res.status(401).json({ error: 'Senha incorreta.' });
   }
+  increment('password_verify_success');
   const expiresAt = (bundle.createdAt || 0) + EXPIRY_MS;
   res.json({ files: bundle.files || [], expiresAt });
 });
 
 function streamZip(res, bundlePath, bundle, files) {
+  const totalBytes = files.reduce((s, f) => s + (f.size || 0), 0);
+  increment('downloads_total');
+  increment('bytes_downloaded', totalBytes);
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);
   let baseName = files.length === 1
@@ -467,18 +514,24 @@ app.get('/download/:id', (req, res) => {
   const id = req.params.id.replace(/[^a-zA-Z0-9-]/g, '');
   const bundlePath = path.join(UPLOAD_DIR, `bundle.${id}.json`);
   if (!fs.existsSync(bundlePath)) {
+    increment('download_errors_404');
     return res.status(404).send('Arquivos não encontrados ou já foram baixados.');
   }
   const bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
   if (isBundleExpired(bundle)) {
     deleteBundle(id, bundle);
+    increment('download_errors_404');
     return res.status(404).send('Arquivos não encontrados ou já foram baixados.');
   }
   if (bundle.passwordHash) {
+    increment('download_errors_auth');
     return res.status(401).send('Senha necessária. Use a página de compartilhamento.');
   }
   const files = bundle.files || [];
-  if (files.length === 0) return res.status(404).send('Nenhum arquivo no pacote.');
+  if (files.length === 0) {
+    increment('download_errors_404');
+    return res.status(404).send('Nenhum arquivo no pacote.');
+  }
   streamZip(res, bundlePath, bundle, files);
 });
 
@@ -486,19 +539,23 @@ app.post('/download/:id', express.json(), (req, res) => {
   const id = req.params.id.replace(/[^a-zA-Z0-9-]/g, '');
   const bundlePath = path.join(UPLOAD_DIR, `bundle.${id}.json`);
   if (!fs.existsSync(bundlePath)) {
+    increment('download_errors_404');
     return res.status(404).json({ error: 'Arquivos não encontrados ou já foram baixados.' });
   }
   const bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
   if (isBundleExpired(bundle)) {
     deleteBundle(id, bundle);
+    increment('download_errors_404');
     return res.status(404).json({ error: 'Arquivos não encontrados ou já foram baixados.' });
   }
   const password = (req.body?.password || '').trim();
   if (!verifyPassword(password, bundle.passwordHash)) {
+    increment('download_errors_auth');
     return res.status(401).json({ error: 'Senha incorreta.' });
   }
   const files = bundle.files || [];
   if (files.length === 0) {
+    increment('download_errors_404');
     return res.status(404).json({ error: 'Nenhum arquivo no pacote.' });
   }
   streamZip(res, bundlePath, bundle, files);
