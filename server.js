@@ -118,6 +118,7 @@ const upload = multer({
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 const RECAPTCHA_SITE_KEY = process.env.RECAPTCHA_SITE_KEY || '';
 const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY || '';
