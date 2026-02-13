@@ -86,7 +86,10 @@
         var email = (emailEl && emailEl.value || '').trim();
 
         if (!message) {
-          if (errEl) { errEl.textContent = 'Digite sua mensagem.'; errEl.classList.remove('hidden'); }
+          if (errEl) {
+            errEl.textContent = (typeof __t === 'function' ? __t('err_feedback_empty') : 'Digite sua mensagem.');
+            errEl.classList.remove('hidden');
+          }
           return;
         }
 
@@ -112,7 +115,7 @@
               loadRecaptchaScript(siteKey, function() {
                 recaptchaLoaded = true;
                 getRecaptchaToken('feedback').then(doSubmit).catch(function() {
-                  done(false, 'Erro no reCAPTCHA. Tente novamente.');
+                  done(false, typeof __t === 'function' ? __t('err_recaptcha') : 'Erro no reCAPTCHA. Tente novamente.');
                 });
               });
             })
@@ -121,7 +124,7 @@
           getRecaptchaToken('feedback')
             .then(doSubmit)
             .catch(function() {
-              done(false, 'Erro no reCAPTCHA. Tente novamente.');
+              done(false, typeof __t === 'function' ? __t('err_recaptcha') : 'Erro no reCAPTCHA. Tente novamente.');
             });
         }
 
@@ -153,7 +156,7 @@
               done(true);
             })
             .catch(function() {
-              done(false, 'Erro ao enviar. Tente novamente.');
+              done(false, typeof __t === 'function' ? __t('err_send') : 'Erro ao enviar. Tente novamente.');
             });
         }
       });

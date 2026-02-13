@@ -23,7 +23,10 @@
 
   var verifiedPassword = '';
 
-  var DOWNLOAD_BTN_HTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg> Baixar';
+  var getDownloadBtnHtml = function() {
+    var label = typeof __t === 'function' ? __t('download_btn') : 'Baixar';
+    return '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg> ' + label;
+  };
   var SPINNER_HTML = '<svg class="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
 
   function formatBytes(n) {
@@ -33,16 +36,17 @@
   }
 
   function formatTimeRemaining(expiresAt) {
+    var t = typeof __t === 'function' ? __t : function(k) { return k; };
     var ms = expiresAt - Date.now();
-    if (ms <= 0) return 'Link expirado';
+    if (ms <= 0) return t('link_expired');
     var s = Math.floor(ms / 1000);
     var m = Math.floor(s / 60);
     var h = Math.floor(m / 60);
     var d = Math.floor(h / 24);
-    if (d >= 1) return 'Expira em ' + d + (d === 1 ? ' dia' : ' dias');
-    if (h >= 1) return 'Expira em ' + h + 'h ' + (m % 60) + 'm';
-    if (m >= 1) return 'Expira em ' + m + (m === 1 ? ' min' : ' min');
-    return 'Expira em menos de 1 min';
+    if (d >= 1) return (d === 1 ? t('expires_in_d') : t('expires_in_days')).replace('{0}', d);
+    if (h >= 1) return t('expires_in_h').replace('{0}', h).replace('{1}', m % 60);
+    if (m >= 1) return t('expires_in_min').replace('{0}', m);
+    return t('expires_soon');
   }
 
   var expiresAtTimer;
@@ -78,7 +82,7 @@
   }
 
   function setupDownloadNoPassword() {
-    downloadBtn.innerHTML = DOWNLOAD_BTN_HTML;
+    downloadBtn.innerHTML = getDownloadBtnHtml();
     downloadBtn.onclick = function() {
       doDownload();
     };
@@ -98,7 +102,7 @@
     downloadBtn.innerHTML = SPINNER_HTML;
     fetch('/download/' + bundleId)
       .then(function(r) {
-        if (!r.ok) throw new Error('Erro ao baixar');
+        if (!r.ok) throw new Error(typeof __t === 'function' ? __t('err_download') : 'Erro ao baixar');
         var disp = r.headers.get('Content-Disposition');
         var m = disp && disp.match(/filename="?([^";\s]+)"?/);
         var filename = m ? m[1] : 'timtransfer-file-download.zip';
@@ -115,8 +119,8 @@
       })
       .catch(function(err) {
         downloadBtn.disabled = false;
-        downloadBtn.innerHTML = DOWNLOAD_BTN_HTML;
-        alert(err.message || 'Erro ao baixar.');
+        downloadBtn.innerHTML = getDownloadBtnHtml();
+        alert(err.message || (typeof __t === 'function' ? __t('err_download') : 'Erro ao baixar.'));
       });
   }
 
@@ -151,8 +155,8 @@
       })
       .catch(function(err) {
         downloadBtn.disabled = false;
-        downloadBtn.innerHTML = DOWNLOAD_BTN_HTML;
-        alert(err.message || 'Erro ao baixar.');
+        downloadBtn.innerHTML = getDownloadBtnHtml();
+        alert(err.message || (typeof __t === 'function' ? __t('err_download') : 'Erro ao baixar.'));
       });
   }
 
@@ -164,7 +168,8 @@
     .then(function(data) {
       loading.classList.add('hidden');
       if (data.requiresPassword) {
-        passwordHint.textContent = data.fileCount + ' arquivo(s) · ' + formatBytes(data.totalSize || 0);
+        var fileLabel = typeof __t === 'function' ? __t('file_s') : 'arquivo(s)';
+        passwordHint.textContent = data.fileCount + ' ' + fileLabel + ' · ' + formatBytes(data.totalSize || 0);
         if (data.expiresAt) startExpiryCountdown(data.expiresAt);
         passwordStep.classList.remove('hidden');
         setTimeout(function() { pinInputs[0].focus(); }, 50);
@@ -206,7 +211,7 @@
   unlockBtn.addEventListener('click', function() {
     var password = pinInputs.map(function(i) { return i.value; }).join('');
     if (!/^\d{4}$/.test(password)) {
-      passwordError.textContent = 'Senha inválida';
+      passwordError.textContent = typeof __t === 'function' ? __t('err_invalid_pin') : 'Senha inválida';
       passwordError.classList.remove('hidden');
       return;
     }
@@ -222,7 +227,7 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         unlockBtn.disabled = false;
-        unlockBtn.textContent = 'Acessar';
+        unlockBtn.textContent = typeof __t === 'function' ? __t('access_btn') : 'Acessar';
         if (data.error) {
           passwordError.textContent = data.error;
           passwordError.classList.remove('hidden');
@@ -237,8 +242,8 @@
       })
       .catch(function() {
         unlockBtn.disabled = false;
-        unlockBtn.textContent = 'Acessar';
-        passwordError.textContent = 'Erro. Tente novamente.';
+        unlockBtn.textContent = typeof __t === 'function' ? __t('access_btn') : 'Acessar';
+        passwordError.textContent = typeof __t === 'function' ? __t('err_retry') : 'Erro. Tente novamente.';
         passwordError.classList.remove('hidden');
       });
   });
